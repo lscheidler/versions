@@ -1,3 +1,9 @@
+0.2.1 (2019-11-01)
+==================
+
+- added group\_ownership to set group ownership for generated files
+- get access\_key\_id and secret\_access\_key from config file
+
 0.2.0 (2019-11-01)
 ==================
 

@@ -14,6 +14,7 @@
 
 require 'aws-sdk-s3'
 require 'digest'
+require 'fileutils'
 require 'json'
 require 'logger'
 require 'optparse'
@@ -36,6 +37,7 @@ module Versions
         environment_name: @config.environment_name,
         instance_id: @config.instance_id,
         version_directory: @config.version_directory,
+        group_ownership: @config.group_ownership,
       )
 
       @pm = PluginManager.instance
@@ -60,6 +62,7 @@ module Versions
           version_directory: '/var/tmp',
           environment_name: 'staging',
           instance_id: Digest.hexencode(Registry.get_fqdn),
+          group_ownership: 'app',
 
           parent_release_directory: '/data/app/data',
 
@@ -170,6 +173,13 @@ Examples:
       File.open(@metadata_filename, 'w') do |io|
         io.print @config.registry.to_s
       end
+      if @config.group_ownership
+        begin
+          FileUtils.chown nil, @config.group_ownership, @metadata_filename
+          FileUtils.chmod "g+w", @metadata_filename
+        rescue ArgumentError
+        end
+      end
       @log.debug 'Generated metadata file ' + @metadata_filename
     end
 
@@ -202,7 +212,7 @@ Examples:
     # list application versions in s3
     def list_remote
       unless get_bucket.nil?
-        remote = Versions::Remote.new(@config.get(:bucket_name), bucket_region: @config.get(:bucket_region), access_key_id: @access_key_id, secret_access_key: @secret_access_key)
+        remote = Versions::Remote.new(@config.get(:bucket_name), bucket_region: @config.get(:bucket_region), access_key_id: @config.access_key_id, secret_access_key: @config.secret_access_key)
 
         data = remote.list(filter: @config.filter, filter_last_modified: @config.filter_last_modified)
         data = data.sort{|a,b| a[:last_modified] <=> b[:last_modified]}
@@ -220,7 +230,7 @@ Examples:
         @log.warn 'No credentials found for s3. Abort.'
       end
     rescue Aws::S3::Errors::AccessDenied
-      if @access_key_id.nil? or @secret_access_key.nil?
+      if @config.access_key_id.nil? or @config.secret_access_key.nil?
         @log.warn 'No credentials found for s3 upload. Access Denied. Abort.'
       else
         @log.warn 'Wrong credentials for s3 upload. Access Denied. Abort.'
@@ -327,9 +337,9 @@ Examples:
     # get aws s3 bucket client
     def get_bucket
       if not @bucket
-        if @access_key_id and @secret_access_key
+        if @config.access_key_id and @config.secret_access_key
           Aws.config.update(
-            credentials: Aws::Credentials.new(@access_key_id, @secret_access_key)
+            credentials: Aws::Credentials.new(@config.access_key_id, @config.secret_access_key)
           )
         end
 
@@ -350,6 +360,14 @@ Examples:
 
           path = '/tmp/'+object.key.tr('/', '.')
           object.download_file(path)
+          if @config.group_ownership
+            begin
+              FileUtils.chown nil, @config.group_ownership, path
+              FileUtils.chmod "g+w", path
+            rescue ArgumentError
+            end
+          end
+
           content = File.new path
           content.seek 0
 
@@ -359,7 +377,7 @@ Examples:
       end
       @version_files
     rescue Aws::S3::Errors::AccessDenied
-      if @access_key_id.nil? or @secret_access_key.nil?
+      if @config.access_key_id.nil? or @config.secret_access_key.nil?
         @log.warn 'No credentials found for s3 upload. Access Denied. Abort.'
       else
         @log.warn 'Wrong credentials for s3 upload. Access Denied. Abort.'

@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-##require 'aws-sdk-s3'
 require 'digest'
+require 'fileutils'
 require 'json'
 require 'socket'
 
@@ -22,10 +22,11 @@ require 'plugin_manager'
 
 module Versions
   class Registry
-    def initialize environment_name:, instance_id: Digest.hexencode(self.class.get_fqdn), version_directory: '/var/tmp'
+    def initialize environment_name:, instance_id: Digest.hexencode(self.class.get_fqdn), version_directory: '/var/tmp', group_ownership: nil
       @environment_name = environment_name
       @instance_id = instance_id
       @version_directory = version_directory
+      @group_ownership = group_ownership
 
       @versions = {}
       @pm = PluginManager.instance
@@ -69,8 +70,17 @@ module Versions
         application.add_current_version version: version, ctime: ctime
       end
 
-      File.open(@version_directory + '/versions.application.' + Digest.hexencode(application.name) + '.json', 'w') do |io|
+      filename = @version_directory + '/versions.application.' + Digest.hexencode(application.name) + '.json'
+      File.open(filename, 'w') do |io|
         io.puts JSON::dump(application)
+      end
+
+      if @group_ownership
+        begin
+          FileUtils.chown nil, @group_ownership, filename
+          FileUtils.chmod "g+w", filename
+        rescue ArgumentError
+        end
       end
     end
 
