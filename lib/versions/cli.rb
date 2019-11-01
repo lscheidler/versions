@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-require 'versions/registry'
-
 require 'aws-sdk-s3'
 require 'digest'
 require 'json'
@@ -23,6 +21,10 @@ require 'socket'
 
 require 'output_helper'
 require 'overlay_config'
+require 'plugin_manager'
+
+require 'versions/plugins'
+require 'versions/registry'
 
 module Versions
   class CLI
@@ -30,24 +32,22 @@ module Versions
       set_defaults
       parse_arguments
 
-      @registry = Registry.new(
+      @config.registry = Registry.new(
         environment_name: @config.environment_name,
         instance_id: @config.instance_id,
         version_directory: @config.version_directory,
       )
 
-      begin
-        if @config.action
-          send @config.action
-        else
-          warn 'No action was set.'
-        end
-      rescue NoMethodError => e
-        if e.message.include? "Versions"
-          warn "No action #{@config.action} found."
-        else
-          raise
-        end
+      @pm = PluginManager.instance
+      @pm.initialize_plugins(defaults: @config)
+
+      case @config.action
+      when :list, :show_diff, :generate_metadata_file, :list_remote, :show_diff_old, :update
+        send @config.action
+      when nil
+        warn 'No action was set.'
+      else
+        warn "No action #{@config.action} found."
       end
     end
 
@@ -58,8 +58,10 @@ module Versions
         defaults: {
           tmp_directory: '/tmp',
           version_directory: '/var/tmp',
-          environment_name: 'local',
+          environment_name: 'staging',
           instance_id: Digest.hexencode(Registry.get_fqdn),
+
+          parent_release_directory: '/data/app/data',
 
           # AWS S3 settings
           bucket_name: 'eu-central-1-application-artifacts',
@@ -137,7 +139,7 @@ Examples:
     # Upload local versions file to s3
     #{opts.program_name} -u
 
-    # Update version of application upload local versions file to s3
+    # Update version of application and upload local versions file to s3
     #{opts.program_name} -u -a application-name -v 0.1.0
 
     # list remote versions, which match p1010 and last-modified timestamp matches 2017-05
@@ -166,7 +168,7 @@ Examples:
     def generate_metadata_file
       @metadata_filename = @config.get(:tmp_directory) + '/versions.' + @config.environment_name + '.' + @config.instance_id + '.json'
       File.open(@metadata_filename, 'w') do |io|
-        io.print @registry.to_s
+        io.print @config.registry.to_s
       end
       @log.debug 'Generated metadata file ' + @metadata_filename
     end
@@ -175,21 +177,18 @@ Examples:
     def list
       data_printer = OutputHelper::Columns.new [:application, :version]
 
-      @registry.get_versions.each do |application, versions|
-        next unless filtered? application
+      @config.registry.get_versions.sort{|a,b| a.first <=> b.first}.each do |application_name, application|
+        next unless filtered? application_name
 
-        if @config.json
-          version = {current: versions[:current]}
-          version[:previous] = versions[:previous] if versions[:previous]
-        else
-          version = versions[:current]
-          version += ' ('+ versions[:previous] + ')' if versions[:previous]
-        end
+        row = if @config.json
+                application.as_json
+              else
+                {
+                  application: application_name,
+                  version: application.to_s
+                }
+              end
 
-        row = {
-          application: application,
-          version: version
-        }
         data_printer << row
       end
 
@@ -242,21 +241,38 @@ Examples:
           host_name = file['host_name'].split('.').shift
           environment = file['environment']
 
-          file['applications'].each do |application, versions|
-            next unless filtered? application
+          if file['applications'].is_a? Array
+            file['applications'].each do |application|
+              next unless filtered? application["application"]
 
-            applications[application] ||= []
-            applications[application] << ({"hostname"=>host_name, "environment"=>environment}).merge(versions)
+              application_data = {"hostname"=>host_name, "environment"=>environment}
+              if (current=application["version"].find{|x| x["type"] == "current"})
+                application_data["current"] = current["version"]
+              end
+              if (previous=application["version"].find{|x| x["type"] == "previous"})
+                application_data["previous"] = previous["version"]
+              end
+
+              applications[application["application"]] ||= []
+              applications[application["application"]] << application_data
+            end
+          else
+            file['applications'].each do |application, versions|
+              next unless filtered? application
+
+              applications[application] ||= []
+              applications[application] << ({"hostname"=>host_name, "environment"=>environment}).merge(versions)
+            end
           end
         end
 
         printer = OutputHelper::Columns.new ['Application', 'Hostname', 'Environment', 'CurrentVersion', 'PreviousVersion']
-        applications.sort{|a,b| a.first <=> b.first}.each do |application, data|
+        applications.sort_by{|k,v| k}.each do |application, data|
           data.each do |item|
             column = {
               Application: application,
               Hostname: item['hostname'],
-              Environment: ((item['environment'] == 'staging') ? item['environment'] : item['environment'].bold),
+              Environment: ((item['environment'] == 'production') ? item['environment'].bold : item['environment']),
               CurrentVersion: colorize_version(application: application, version: item['current']),
               #PreviousVersion: colorize_version(application: application, version: item['previous']),
               PreviousVersion: item['previous'],
@@ -297,7 +313,7 @@ Examples:
     def update
       unless get_bucket.nil?
         if @config.application and @config.version
-          @registry.update_version application: @config.application, version: @config.version
+          @config.registry.update_version application: @config.application, version: @config.version, ctime: Time.now
         end
 
         generate_metadata_file

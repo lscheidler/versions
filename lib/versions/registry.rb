@@ -18,45 +18,64 @@ require 'json'
 require 'socket'
 
 require 'overlay_config'
+require 'plugin_manager'
 
 module Versions
   class Registry
-    def initialize environment_name:, instance_id:, version_directory: '/var/tmp'
+    def initialize environment_name:, instance_id: Digest.hexencode(self.class.get_fqdn), version_directory: '/var/tmp'
       @environment_name = environment_name
       @instance_id = instance_id
       @version_directory = version_directory
+
+      @versions = {}
+      @pm = PluginManager.instance
+    end
+
+    def [] application_name
+      @versions[application_name] ||= Application.new application_name
+      @versions[application_name]
     end
 
     # get all local switched applications
     def get_versions
-      unless @versions
-        @versions = {}
-        Dir.glob(File.join(@version_directory, 'versions.application.*.json')) do |file|
-          data = JSON::parse(File.read(file))
-          @versions[data.delete('application')] = {
-            current: data['current'],
-            previous: data['previous'],
-          }
+      Dir.glob(File.join(@version_directory, 'versions.application.*.json')) do |file|
+        data = JSON::parse(File.read(file))
+        application = self[data.delete('application')]
+        if (current=data["version"].find{|x| x["type"] == "current"})
+          application.add_current_version version: current["version"], ctime: Time.parse(current["ctime"])
         end
+        if (previous=data["version"].find{|x| x["type"] == "previous"})
+          application.add_previous_version version: previous["version"], ctime: Time.parse(previous["ctime"])
+        end
+      end
+
+      @pm.each do |plugin_name, plugin|
+        plugin.get_versions
       end
       @versions
     end
 
-    def update_version application:, version:
+    def update_version application:, version:, ctime:, type: nil
       get_versions
-      @versions[application] = {
-        application: application,
-        current: version,
-        previous: (@versions.has_key? application) ? @versions[application][:current] : nil,
-      }
 
-      File.open(@version_directory + '/versions.application.' + Digest.hexencode(application) + '.json', 'w') do |io|
-        io.puts JSON::dump(@versions[application])
+      application = self[application]
+
+      case type
+      when :previous
+        application[:previous] = version
+        application.add_previous_version version: version, ctime: ctime
+      else
+        application.add_previous_version version: application.get_current[:version], ctime: ctime if application.get_current
+        application.add_current_version version: version, ctime: ctime
+      end
+
+      File.open(@version_directory + '/versions.application.' + Digest.hexencode(application.name) + '.json', 'w') do |io|
+        io.puts JSON::dump(application)
       end
     end
 
     def to_s
-      metadata = {last_updated: Time.now, host_name: self.class.get_fqdn, environment: @environment_name, instance_id: @instance_id, applications: get_versions}
+      metadata = {last_updated: Time.now, host_name: self.class.get_fqdn, environment: @environment_name, instance_id: @instance_id, applications: get_versions.values}
       JSON::pretty_generate metadata
     end
 
