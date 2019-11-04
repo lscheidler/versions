@@ -79,7 +79,7 @@ module Versions
         begin
           FileUtils.chown nil, @group_ownership, filename
           FileUtils.chmod "g+w", filename
-        rescue ArgumentError
+        rescue ArgumentError, Errno::EPERM
         end
       end
     end

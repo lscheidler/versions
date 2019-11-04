@@ -1,3 +1,8 @@
+0.2.2 (2019-11-04)
+==================
+
+- catch Errno::EPERM, if not user, which created file
+
 0.2.1 (2019-11-01)
 ==================
 

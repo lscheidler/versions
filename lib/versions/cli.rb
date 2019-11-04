@@ -177,7 +177,7 @@ Examples:
         begin
           FileUtils.chown nil, @config.group_ownership, @metadata_filename
           FileUtils.chmod "g+w", @metadata_filename
-        rescue ArgumentError
+        rescue ArgumentError, Errno::EPERM
         end
       end
       @log.debug 'Generated metadata file ' + @metadata_filename
@@ -364,7 +364,7 @@ Examples:
             begin
               FileUtils.chown nil, @config.group_ownership, path
               FileUtils.chmod "g+w", path
-            rescue ArgumentError
+            rescue ArgumentError, Errno::EPERM
             end
           end
 
