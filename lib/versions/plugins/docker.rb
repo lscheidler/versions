@@ -28,6 +28,8 @@ module Versions
 
       # get all local switched applications
       def get_versions
+        return if not File.exists? "/usr/bin/docker"
+
         cmd = ['docker', 'images', '--format', '{{.ID}} {{.Tag}}']
         cmd << @docker_repository if @docker_repository
         res = execute(cmd)

@@ -76,6 +76,7 @@ module Versions
         }
       )
       @log = Logger.new STDOUT
+      @log.level = Logger::INFO
     end
 
     # parse command line arguments

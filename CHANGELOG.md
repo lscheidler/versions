@@ -1,3 +1,8 @@
+0.2.3 (2019-11-14)
+==================
+
+- bugfix: don't try to get docker versions, if docker isn't available
+
 0.2.2 (2019-11-04)
 ==================
 
