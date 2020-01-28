@@ -44,7 +44,7 @@ module Versions
       @pm.initialize_plugins(defaults: @config)
 
       case @config.action
-      when :list, :show_diff, :generate_metadata_file, :list_remote, :show_diff_old, :update
+      when :list, :show_diff, :generate_metadata_file, :list_remote, :update
         send @config.action
       when nil
         warn 'No action was set.'
@@ -73,6 +73,9 @@ module Versions
 
           action: :list,
           filter: [],
+
+          #
+          suppress_matching: true,
         }
       )
       @log = Logger.new STDOUT
@@ -119,8 +122,8 @@ module Versions
           @config.filter_last_modified = /#{filter}/
         end
 
-        opts.on('--old-diff', 'show different versions between production and staging') do
-          @config.action = :show_diff_old
+        opts.on('--show-all', 'show all applications and versions in --diff') do
+          @config.suppress_matching = false
         end
 
         opts.on('--show-diff', 'show different versions between production and staging') do
@@ -279,8 +282,9 @@ Examples:
 
         printer = OutputHelper::Columns.new ['Application', 'Hostname', 'Environment', 'CurrentVersion', 'PreviousVersion']
         applications.sort_by{|k,v| k}.each do |application, data|
+          rows = []
           data.each do |item|
-            column = {
+            row = {
               Application: application,
               Hostname: item['hostname'],
               Environment: ((item['environment'] == 'production') ? item['environment'].bold : item['environment']),
@@ -288,7 +292,11 @@ Examples:
               #PreviousVersion: colorize_version(application: application, version: item['previous']),
               PreviousVersion: item['previous'],
             }
-            printer << column
+            rows << row
+          end
+
+          if not @config.suppress_matching or rows.map{|x| x[:CurrentVersion]}.sort.uniq.length > 1
+            rows.each{|row| printer << row}
           end
         end
         puts printer

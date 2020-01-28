@@ -1,3 +1,9 @@
+0.2.4 (2020-01-28)
+==================
+
+- diff: changed default behavior, so diff shows only applications with different versions
+- added --show-all for old behavior
+
 0.2.3 (2019-11-14)
 ==================
 
